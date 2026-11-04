@@ -145,7 +145,7 @@ graph TB
     NRB -->|"métricas · logs · eventos"| NR
 ```
 
-Este repositório provisiona a **base** (VPC, EKS, ECR, ALB Controller, OIDC) e a **observabilidade do cluster** (`nri-bundle`, dashboard e alertas). O **RDS** é criado em [`tc3-infra-db`](https://github.com/tiagostorch/tc3-infra-db) e as **Lambdas + API Gateway** em [`tc3-auth-lambda`](https://github.com/tiagostorch/tc3-auth-lambda), ambos lendo os outputs daqui pelo state remoto.
+Este repositório provisiona a **base** (VPC, EKS, ECR, ALB Controller, OIDC) e a **observabilidade do cluster** (`nri-bundle`, dashboard e alertas). O **RDS** é criado em [`tc3-infra-db`](https://github.com/fiap-soat-oficina-tech-challenge/tc3-infra-db) e as **Lambdas + API Gateway** em [`tc3-auth-lambda`](https://github.com/fiap-soat-oficina-tech-challenge/tc3-auth-lambda), ambos lendo os outputs daqui pelo state remoto.
 
 ## Observabilidade
 
