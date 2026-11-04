@@ -103,7 +103,7 @@ configuração, ambas opcionais:
 
 ### Subir e derrubar o ambiente inteiro
 
-`.github/workflows/ambiente.yml` aplica, na ordem das dependências, o Terraform deste repositório, do [`tc3-auth-lambda`](https://github.com/tiagostorch/tc3-auth-lambda) e a pasta `terraform/` dos três serviços. O código de cada parte continua no repositório dela; o workflow só baixa a `develop` de cada um e roda o Terraform. É disparado por tag, criada no commit atual da `develop`:
+`.github/workflows/ambiente.yml` aplica, na ordem das dependências, o Terraform deste repositório, do [`tc3-auth-lambda`](https://github.com/fiap-soat-oficina-tech-challenge/tc3-auth-lambda) e a pasta `terraform/` dos três serviços. O código de cada parte continua no repositório dela; o workflow só baixa a `develop` de cada um e roda o Terraform. É disparado por tag, criada no commit atual da `develop`:
 
 ```bash
 git tag ambiente-subir-1 && git push origin ambiente-subir-1
@@ -165,7 +165,7 @@ graph TB
     NRB -->|"métricas · logs · eventos"| NR
 ```
 
-Este repositório provisiona a **base** (VPC, EKS, ECR, ALB Controller, OIDC) e a **observabilidade do cluster** (`nri-bundle`, dashboard e alertas). Os **bancos** são criados na pasta `terraform/` de cada serviço e as **Lambdas + API Gateway** em [`tc3-auth-lambda`](https://github.com/tiagostorch/tc3-auth-lambda), todos lendo os outputs daqui pelo state remoto.
+Este repositório provisiona a **base** (VPC, EKS, ECR, ALB Controller, OIDC) e a **observabilidade do cluster** (`nri-bundle`, dashboard e alertas). Os **bancos** são criados na pasta `terraform/` de cada serviço e as **Lambdas + API Gateway** em [`tc3-auth-lambda`](https://github.com/fiap-soat-oficina-tech-challenge/tc3-auth-lambda), todos lendo os outputs daqui pelo state remoto.
 
 ## Observabilidade
 
