@@ -97,7 +97,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: tiagostorch/tc3-auth-lambda
+          repository: fiap-soat-oficina-tech-challenge/tc3-auth-lambda
           ref: ${{ env.REF }}
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -142,7 +142,7 @@ jobs:
       fail-fast: false
       matrix:
         repositorio:
-          - LucasValada/tech-challenge-fiap
+          - fiap-soat-oficina-tech-challenge/tech-challenge-fiap
           - fiap-soat-oficina-tech-challenge/oficina-billing-service
           - fiap-soat-oficina-tech-challenge/oficina-execution-service
     defaults:
@@ -223,7 +223,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: tiagostorch/tc3-auth-lambda
+          repository: fiap-soat-oficina-tech-challenge/tc3-auth-lambda
           ref: ${{ env.REF }}
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -265,7 +265,7 @@ jobs:
       fail-fast: false
       matrix:
         repositorio:
-          - LucasValada/tech-challenge-fiap
+          - fiap-soat-oficina-tech-challenge/tech-challenge-fiap
           - fiap-soat-oficina-tech-challenge/oficina-billing-service
           - fiap-soat-oficina-tech-challenge/oficina-execution-service
     defaults:

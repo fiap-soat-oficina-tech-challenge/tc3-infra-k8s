@@ -1,9 +1,14 @@
 # Observabilidade
 
-Métricas, logs, traces e alertas da oficina no New Relic, sem CloudWatch em
-nenhum ponto do caminho.
+Métricas, logs, traces e alertas da oficina no New Relic, sem CloudWatch no
+caminho. A única exceção é o alerta das DLQs da Saga (seção 5), porque o SQS
+não tem agente.
 
-Este documento vale para os quatro repositórios do projeto. Mora aqui porque é
+Este documento vale para os cinco repositórios do projeto. Na Fase 4, cada
+microsserviço é um app próprio no APM (`oficina-api` para o OS Service,
+`oficina-billing` e `oficina-execution`), com o mesmo formato de log, e o
+`correlationId` da OS vai em toda mensagem da Saga: filtrar os logs por ele
+mostra o fluxo de uma OS nos três serviços (ver [Consultas úteis](#consultas-úteis)). Mora aqui porque é
 `tc3-infra-k8s` quem detém a conta do New Relic no Terraform — a chave de
 ingestão, os dashboards e as políticas de alerta.
 
@@ -715,6 +720,14 @@ ainda estão sendo calibrados.
 ```sql
 -- A requisição inteira, ponta a ponta
 SELECT * FROM Log WHERE correlationId = 'COLE-AQUI' SINCE 1 day ago
+
+-- Fase 4: o fluxo de uma OS nos três serviços. Atrás do ALB, o correlationId é
+-- o X-Amzn-Trace-Id (Self=...;Root=...), então o filtro usa o Root
+SELECT timestamp, servico, evento, message FROM Log
+WHERE correlationId LIKE '%Root=COLE-AQUI%' SINCE 1 day ago
+
+-- Quantas linhas de cada serviço o fluxo de uma OS gerou
+SELECT count(*) FROM Log WHERE correlationId LIKE '%Root=COLE-AQUI%' FACET servico SINCE 1 day ago
 
 -- Todos os logs emitidos dentro de um trace
 SELECT * FROM Log WHERE `trace.id` = 'COLE-AQUI'
