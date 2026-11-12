@@ -561,6 +561,60 @@ resource "newrelic_nrql_alert_condition" "integracao_banco" {
   }
 }
 
+# ─── Mensageria da Saga (Fase 4) ────────────────────────────────────────────
+# Uma mensagem na DLQ é falha técnica que esgotou as 5 tentativas de consumo
+# (docs/contratos.md do OS Service): alguém precisa corrigir a causa e
+# reprocessar a mensagem (redrive). Uma condição cobre as três DLQs, com um
+# sinal por fila (FACET), então o incidente diz qual fila encheu.
+#
+# É a única condição que lê métrica do CloudWatch: o SQS não tem agente, e a
+# métrica chega pelo Metric Stream da conta (stack NewRelic-Metric-Streams,
+# criada à mão, fora deste Terraform). Sem o stream, a condição não recebe dado
+# e não dispara. DLQ vazia e parada também não publica métrica, e isso não é
+# violação: a condição só olha valores acima de zero.
+
+locals {
+  filas_dlq = [
+    "oficina-os-saga-replies-dlq",
+    "oficina-billing-commands-dlq",
+    "oficina-execution-commands-dlq",
+  ]
+}
+
+resource "newrelic_nrql_alert_condition" "mensageria_dlq" {
+  account_id = var.newrelic_account_id
+  policy_id  = newrelic_alert_policy.oficina.id
+  type       = "static"
+  name       = "Mensageria — mensagem na DLQ"
+  description = join(" ", [
+    "Uma mensagem da Saga esgotou as tentativas e foi para a DLQ. Ver nos logs",
+    "do serviço consumidor o erro do correlationId da mensagem, corrigir a causa",
+    "e reprocessar com o redrive da DLQ para a fila de origem.",
+  ])
+
+  enabled                      = true
+  aggregation_method           = "event_flow"
+  aggregation_window           = 300
+  aggregation_delay            = 180
+  violation_time_limit_seconds = 86400
+
+  nrql {
+    query = <<-NRQL
+      SELECT max(aws.sqs.ApproximateNumberOfMessagesVisible)
+      FROM Metric
+      WHERE aws.sqs.QueueName IN (${join(", ", [for fila in local.filas_dlq : "'${fila}'"])})
+      FACET aws.sqs.QueueName
+    NRQL
+  }
+
+  critical {
+    operator              = "above"
+    threshold             = 0
+    threshold_duration    = 300
+    threshold_occurrences = "AT_LEAST_ONCE"
+  }
+}
+
 # ─── Consumo do free tier ───────────────────────────────────────────────────
 # O limite de 100 GB/mês não gera cobrança ao ser ultrapassado: a conta PARA de
 # ingerir até o mês virar, e todos os alertas acima ficam cegos ao mesmo tempo.

@@ -1,0 +1,315 @@
+name: Ambiente
+
+# Sobe ou derruba o ambiente inteiro do projeto, na ordem das dependências entre
+# os repositórios. O Terraform de cada parte continua no repositório dela; aqui
+# fica só a ordem. Disparo por tag, a partir do commit atual da develop:
+#
+#   git tag ambiente-subir-1    && git push origin ambiente-subir-1
+#   git tag ambiente-derrubar-1 && git push origin ambiente-derrubar-1
+#
+# Subir: plataforma → Lambdas → terraform/ dos três serviços (o do OS traz o
+# banco do OS).
+# Os deploys dos serviços ficam com o CD de cada repositório (o GITHUB_TOKEN
+# daqui não dispara workflows de outro repositório). Num ambiente novo, o ALB
+# só nasce no primeiro deploy, então a sequência é: tag de subir → CDs
+# (Execution e Billing, depois OS) → outra tag de subir, que liga a rota
+# ANY /{proxy+} do API Gateway ao ALB. Tudo o mais sai sem mudanças.
+#
+# Derrubar: o caminho inverso, começando pelos namespaces dos serviços (o
+# Load Balancer Controller apaga o ALB, que senão prende a VPC).
+
+on:
+  push:
+    tags:
+      - "ambiente-subir-*"
+      - "ambiente-derrubar-*"
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: "1.13.3"
+  NODE_VERSION: "22"
+  EKS_CLUSTER: tc3-oficina-homolog
+
+  # Branch aplicada nos outros repositórios.
+  REF: develop
+
+  # Plataforma: as mesmas variáveis do terraform.yml. Se divergirem, este apply
+  # e o do push ficam desfazendo um ao outro.
+  TF_VAR_newrelic_account_id: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+  TF_VAR_newrelic_api_key: ${{ secrets.NEW_RELIC_API_KEY }}
+  TF_VAR_newrelic_license_key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+  TF_VAR_alert_emails: ${{ vars.ALERT_EMAILS || '[]' }}
+  TF_VAR_synthetics_uptime_url: ${{ vars.SYNTHETICS_UPTIME_URL }}
+
+  # tc3-auth-lambda e o terraform/ dos serviços.
+  TF_VAR_state_bucket: ${{ secrets.TF_STATE_BUCKET }}
+
+  # tc3-auth-lambda: o mesmo valor da variable NEWRELIC_LAYER_ARN daquele
+  # repositório, escrito aqui porque a variable de um repositório não é
+  # visível em outro.
+  TF_VAR_newrelic_layer_arn: "arn:aws:lambda:us-east-1:451483290750:layer:NewRelicNodeJS22X:105"
+
+  # Espera o lock do state em vez de falhar quando o apply de um push no mesmo
+  # repositório ainda está rodando.
+  TF_CLI_ARGS_apply: "-lock-timeout=30m"
+  TF_CLI_ARGS_destroy: "-lock-timeout=30m"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ambiente
+  cancel-in-progress: false
+
+jobs:
+  # ─── Subir ──────────────────────────────────────────────────────────────────
+
+  plataforma:
+    name: Subir · plataforma (tc3-infra-k8s)
+    if: startsWith(github.ref_name, 'ambiente-subir-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Init
+        run: terraform init -input=false -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}"
+
+      - name: Apply
+        run: terraform apply -auto-approve -input=false
+
+  lambda:
+    name: Subir · Lambdas e API Gateway (tc3-auth-lambda)
+    needs: plataforma
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: fiap-soat-oficina-tech-challenge/tc3-auth-lambda
+          ref: ${{ env.REF }}
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Empacotar as funções
+        working-directory: .
+        run: |
+          npm ci
+          npm run package
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Init
+        run: terraform init -input=false -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}"
+
+      - name: Apply
+        run: terraform apply -auto-approve -input=false
+
+      - name: Rota para os serviços
+        run: |
+          if terraform state list | grep -q '^aws_apigatewayv2_route\.aplicacao'; then
+            echo "API Gateway roteando para o ALB dos serviços." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::O ALB dos serviços ainda não existe. Rode os CDs (Execution e Billing, depois OS) e crie outra tag ambiente-subir-* para ligar a rota ANY /{proxy+}."
+          fi
+
+  servicos:
+    name: Subir · ${{ matrix.repositorio }}
+    needs: lambda
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repositorio:
+          - fiap-soat-oficina-tech-challenge/tech-challenge-fiap
+          - fiap-soat-oficina-tech-challenge/oficina-billing-service
+          - fiap-soat-oficina-tech-challenge/oficina-execution-service
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ matrix.repositorio }}
+          ref: ${{ env.REF }}
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Init
+        run: terraform init -input=false -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}"
+
+      - name: Apply
+        run: terraform apply -auto-approve -input=false
+
+  # ─── Derrubar ───────────────────────────────────────────────────────────────
+
+  derrubar-deploys:
+    name: Derrubar · deploys dos serviços e ALB
+    if: startsWith(github.ref_name, 'ambiente-derrubar-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Apagar os namespaces dos serviços
+        run: |
+          if ! aws eks describe-cluster --name "$EKS_CLUSTER" >/dev/null 2>&1; then
+            echo "Cluster $EKS_CLUSTER não existe: nada a apagar."
+            exit 0
+          fi
+          aws eks update-kubeconfig --name "$EKS_CLUSTER" --region "$AWS_REGION"
+          kubectl delete namespace oficina oficina-billing oficina-execution \
+            --ignore-not-found --wait=true --timeout=10m
+
+      # O controller apaga o ALB de forma assíncrona depois que os Ingresses
+      # somem. Se o destroy da VPC começar antes, falha com dependência.
+      - name: Esperar o ALB sumir
+        run: |
+          alb_do_grupo() {
+            local arns
+            read -ra arns <<< "$(aws elbv2 describe-load-balancers --query 'LoadBalancers[].LoadBalancerArn' --output text)"
+            [ "${#arns[@]}" -gt 0 ] || return 1
+            aws elbv2 describe-tags --resource-arns "${arns[@]}" \
+              --query "TagDescriptions[?Tags[?Key=='ingress.k8s.aws/stack' && Value=='oficina']].ResourceArn" \
+              --output text | grep -q .
+          }
+          limite=$((SECONDS + 600))
+          while alb_do_grupo; do
+            if [ "$SECONDS" -ge "$limite" ]; then
+              echo "::error::O ALB do grupo oficina continua existindo depois de 10 minutos."
+              exit 1
+            fi
+            sleep 15
+          done
+          echo "Nenhum ALB do grupo oficina."
+
+  derrubar-lambda:
+    name: Derrubar · Lambdas e API Gateway (tc3-auth-lambda)
+    needs: derrubar-deploys
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: fiap-soat-oficina-tech-challenge/tc3-auth-lambda
+          ref: ${{ env.REF }}
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # O Terraform lê o pacote das funções também no destroy.
+      - name: Empacotar as funções
+        working-directory: .
+        run: |
+          npm ci
+          npm run package
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Init
+        run: terraform init -input=false -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}"
+
+      - name: Destroy
+        run: terraform destroy -auto-approve -input=false
+
+  # Antes da plataforma: a política de acesso de cada serviço fica anexada à
+  # role dos nós do EKS, e a AWS não apaga role com política anexada. O do OS
+  # também tira do cluster o agente de monitoria do banco, então o cluster
+  # ainda precisa existir.
+  derrubar-servicos:
+    name: Derrubar · ${{ matrix.repositorio }}
+    needs: derrubar-lambda
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repositorio:
+          - fiap-soat-oficina-tech-challenge/tech-challenge-fiap
+          - fiap-soat-oficina-tech-challenge/oficina-billing-service
+          - fiap-soat-oficina-tech-challenge/oficina-execution-service
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ matrix.repositorio }}
+          ref: ${{ env.REF }}
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Init
+        run: terraform init -input=false -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}"
+
+      - name: Destroy
+        run: terraform destroy -auto-approve -input=false
+
+  derrubar-plataforma:
+    name: Derrubar · plataforma (tc3-infra-k8s)
+    needs: derrubar-servicos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Init
+        run: terraform init -input=false -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}"
+
+      - name: Destroy
+        run: terraform destroy -auto-approve -input=false

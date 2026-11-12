@@ -100,8 +100,9 @@ module "eks" {
   }
 }
 
-# Permite que os pods da aplicação alcancem o Postgres. O security group do RDS
-# (repositório tc3-infra-db) referencia este como origem autorizada.
+# Permite que os pods dos serviços alcancem os bancos. Os security groups dos
+# RDS do OS e do Billing (terraform/ de cada serviço) referenciam este como
+# origem autorizada.
 output "node_security_group_id" {
   description = "Security group dos nós — origem do tráfego dos pods."
   value       = module.eks.node_security_group_id

@@ -40,8 +40,14 @@ variable "node_instance_type" {
 }
 
 variable "node_desired_size" {
-  type    = number
-  default = 3
+  description = <<-EOT
+    Na Fase 4 o cluster roda três serviços com duas réplicas cada. Só os pods
+    de sistema ocupam cerca de 25 das 33 vagas de três nós, e os serviços
+    levariam a 31, sem espaço para a migration e o rollout. Quatro nós dão 44
+    vagas.
+  EOT
+  type        = number
+  default     = 4
 }
 
 variable "node_min_size" {
@@ -141,7 +147,7 @@ variable "newrelic_tags" {
     Kubernetes, campos de cada log coletado pelo Fluent Bit, tags do dashboard
     e das condições de alerta — e é por elas que alertas e painéis filtram.
 
-    Os mesmos valores estão em `newrelic_tags` de tc3-infra-db e
+    Os mesmos valores estão em `newrelic_tags` do terraform/ do OS e de
     tc3-auth-lambda, e em `NEW_RELIC_LABELS` do ConfigMap da aplicação. Mudar
     aqui sem mudar lá deixa condições olhando para dado que ninguém publica.
 

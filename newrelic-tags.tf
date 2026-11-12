@@ -8,7 +8,7 @@
 #   APM da aplicação          NEW_RELIC_LABELS (ConfigMap)       tech-challenge-fiap
 #   Logs da aplicação         `base` do pino, da mesma variável  tech-challenge-fiap
 #   Lambda de autenticação    NEW_RELIC_LABELS + atributos       tc3-auth-lambda
-#   Agente de banco           NRIA_CUSTOM_ATTRIBUTES             tc3-infra-db
+#   Agente de banco           NRIA_CUSTOM_ATTRIBUTES             terraform/ do OS
 #   Monitor sintético         bloco `tag`                        newrelic-synthetics.tf
 #   Dashboard e condições     este arquivo
 #

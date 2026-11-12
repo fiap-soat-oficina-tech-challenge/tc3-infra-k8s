@@ -1,9 +1,14 @@
 # Observabilidade
 
-Métricas, logs, traces e alertas da oficina no New Relic, sem CloudWatch em
-nenhum ponto do caminho.
+Métricas, logs, traces e alertas da oficina no New Relic, sem CloudWatch no
+caminho. A única exceção é o alerta das DLQs da Saga (seção 5), porque o SQS
+não tem agente.
 
-Este documento vale para os quatro repositórios do projeto. Mora aqui porque é
+Este documento vale para os cinco repositórios do projeto. Na Fase 4, cada
+microsserviço é um app próprio no APM (`oficina-api` para o OS Service,
+`oficina-billing` e `oficina-execution`), com o mesmo formato de log, e o
+`correlationId` da OS vai em toda mensagem da Saga: filtrar os logs por ele
+mostra o fluxo de uma OS nos três serviços (ver [Consultas úteis](#consultas-úteis)). Mora aqui porque é
 `tc3-infra-k8s` quem detém a conta do New Relic no Terraform — a chave de
 ingestão, os dashboards e as políticas de alerta.
 
@@ -62,7 +67,7 @@ zero.
                                           └──────────────┘
 ```
 
-Nenhuma seta passa por CloudWatch Logs, Metric Stream ou Firehose.
+Nenhuma seta passa por CloudWatch Logs, Metric Stream ou Firehose. A única exceção é o alerta das DLQs da Saga (seção 5), porque o SQS não tem agente.
 
 ### Onde cada peça mora
 
@@ -73,7 +78,7 @@ Nenhuma seta passa por CloudWatch Logs, Metric Stream ou Firehose.
 | `tc3-infra-k8s` | `newrelic-alertas.tf` | Política, condições (inclui consumo do free tier) e notificação por e-mail |
 | `tc3-infra-k8s` | `newrelic-tags.tf` | Tags `environment`/`project` no dashboard e nas condições |
 | `tc3-infra-k8s` | `newrelic-synthetics.tf` | Monitor externo de disponibilidade |
-| `tc3-infra-db` | `newrelic-postgres.tf` | Usuário de leitura, agente que raspa o RDS, sondas e tags |
+| `tech-challenge-fiap` (OS) | `terraform/newrelic-postgres.tf` | Usuário de leitura, agente que raspa o RDS do OS, sondas e tags |
 | `tc3-auth-lambda` | `infra/lambda.tf` | Layer, wrapper e variáveis da extension (license key por nome de parâmetro SSM) |
 | `tc3-auth-lambda` | `infra/apigateway.tf` | CORS liberando os cabeçalhos W3C e expondo `traceresponse` |
 | `tc3-auth-lambda` | `src/handler.ts`, `src/observabilidade.ts` | Log JSON com `trace.id`/`span.id`, tags, `traceresponse` W3C |
@@ -96,7 +101,7 @@ versionado. Cada repositório tem um `.env` na raiz — **ignorado pelo git**
 .env / secret do GitHub ──TF_VAR_newrelic_license_key──▶ tc3-infra-k8s ──▶ SSM (SecureString)
                                                               │                  │
                                          helm set_sensitive ◀─┘                  ├─▶ CD da API ──▶ Secret app-secret ──▶ pod (secretKeyRef)
-                                         (nri-bundle)                            ├─▶ tc3-infra-db ──▶ Secret nri-postgresql ──▶ agente de banco
+                                         (nri-bundle)                            ├─▶ terraform/ do OS ──▶ Secret nri-postgresql ──▶ agente de banco
                                                                                  └─▶ extension da Lambda (lê em runtime pelo NOME do parâmetro)
 ```
 
@@ -158,12 +163,12 @@ Aplicando da própria máquina, os mesmos valores vão em `terraform.tfvars` —
 ### Ordem de aplicação
 
 ```
-bootstrap  →  tc3-infra-k8s  →  tc3-infra-db  →  tc3-auth-lambda
+bootstrap  →  tc3-infra-k8s  →  tc3-auth-lambda  →  terraform/ dos serviços
 ```
 
 A ordem não é sugestão. `tc3-infra-k8s` cria o namespace `newrelic` e publica a
-license key no SSM; `tc3-infra-db` monta o agente de banco dentro desse namespace
-e lê a chave de lá; `tc3-auth-lambda` lê a mesma chave. Aplicar fora de ordem
+license key no SSM; o `terraform/` do OS monta o agente de banco dentro desse
+namespace e lê a chave de lá; `tc3-auth-lambda` lê a mesma chave. Aplicar fora de ordem
 falha com "namespace not found" ou "parameter not found".
 
 ---
@@ -235,7 +240,7 @@ abre incidente quando as amostras param de chegar.
 Sem CloudWatch não existe `AWS/RDS`. A monitoria passa a ser feita por um
 `Deployment` no cluster rodando a imagem `newrelic/infrastructure-bundle` com a
 integração `nri-postgresql` configurada — declarado em
-`tc3-infra-db/newrelic-postgres.tf`.
+`terraform/newrelic-postgres.tf`, no repositório do OS.
 
 O agente abre conexão no endpoint do RDS e lê `pg_stat_database`,
 `pg_stat_bgwriter` e companhia. São as mesmas visões do catálogo que a AWS lê
@@ -640,6 +645,7 @@ seletor manda — é assim que se investiga um incidente, estreitando o interval
 | Kubernetes — contêiner reiniciando | `K8sContainerSample` | > 2 reinícios em 5 min |
 | Uptime — nenhum pod pronto | `K8sPodSample` | zero réplicas prontas, ou 10 min sem sinal |
 | Uptime — healthcheck externo | `SyntheticCheck` | qualquer falha *(se a URL estiver configurada)* |
+| Mensageria — mensagem na DLQ | `Metric` (`aws.sqs.ApproximateNumberOfMessagesVisible`, via Metric Stream) | qualquer mensagem em uma das três DLQs da Saga, com um sinal por fila |
 
 Duas escolhas de desenho valem explicação.
 
@@ -663,6 +669,16 @@ fora" na prática.
 jeito mais rápido de escrever uma condição que nunca dispara. As tags padrão
 são escritas por nós — aplicação, Lambda e agente de banco — e não têm essa
 ambiguidade.
+
+**A DLQ é lida do CloudWatch.** O SQS não tem agente que empurre métrica, então
+o alerta das DLQs (`oficina-os-saga-replies-dlq`, `oficina-billing-commands-dlq`
+e `oficina-execution-commands-dlq`) usa o Metric Stream da conta, da stack
+`NewRelic-Metric-Streams` criada à mão. É a dependência que o resto do desenho
+evita, aceita aqui porque a alternativa seria cada serviço adivinhar a última
+tentativa de uma mensagem. Sem o stream, a condição fica sem dado e não dispara:
+remover a stack desliga este alerta. Mensagem na DLQ significa que a Saga parou
+naquela OS. O conserto é corrigir a causa e fazer o *redrive* para a fila de
+origem, e os consumidores são idempotentes, então reprocessar é seguro.
 
 ### Tags padrão
 
@@ -704,6 +720,14 @@ ainda estão sendo calibrados.
 ```sql
 -- A requisição inteira, ponta a ponta
 SELECT * FROM Log WHERE correlationId = 'COLE-AQUI' SINCE 1 day ago
+
+-- Fase 4: o fluxo de uma OS nos três serviços. Atrás do ALB, o correlationId é
+-- o X-Amzn-Trace-Id (Self=...;Root=...), então o filtro usa o Root
+SELECT timestamp, servico, evento, message FROM Log
+WHERE correlationId LIKE '%Root=COLE-AQUI%' SINCE 1 day ago
+
+-- Quantas linhas de cada serviço o fluxo de uma OS gerou
+SELECT count(*) FROM Log WHERE correlationId LIKE '%Root=COLE-AQUI%' FACET servico SINCE 1 day ago
 
 -- Todos os logs emitidos dentro de um trace
 SELECT * FROM Log WHERE `trace.id` = 'COLE-AQUI'

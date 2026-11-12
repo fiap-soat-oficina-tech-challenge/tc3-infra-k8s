@@ -685,7 +685,7 @@ resource "newrelic_one_dashboard" "oficina" {
       }
     }
 
-    # Nomes do PostgreSQL 17 (a versão travada em tc3-infra-db): a partir do 17
+    # Nomes do PostgreSQL 17 (a versão do banco do OS): a partir do 17
     # o nri-postgresql lê checkpoints de `pg_stat_checkpointer` (prefixo
     # `checkpointer.`) e escrita por backend de `pg_stat_io` (prefixo `io.`).
     # Os nomes `bgwriter.*` antigos dessas duas medidas deixam de existir.
@@ -841,8 +841,8 @@ resource "newrelic_one_dashboard" "oficina" {
 
         **Se o alerta de consumo abrir**, em ordem de impacto: (1) confira a tabela de log acima e exclua o
         maior emissor que não seja a API; (2) reduza `NEW_RELIC_SPAN_EVENTS_MAX_SAMPLES_STORED` no ConfigMap
-        da aplicação; (3) suba `LOG_LEVEL` da API para `warn`; (4) aumente `newrelic_postgres_interval` em
-        tc3-infra-db.
+        da aplicação; (3) suba `LOG_LEVEL` da API para `warn`; (4) aumente `newrelic_postgres_interval` no
+        terraform/ do OS.
       TEXTO
     }
   }

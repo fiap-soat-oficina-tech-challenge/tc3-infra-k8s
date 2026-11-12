@@ -9,11 +9,13 @@ budget_limit_usd    = "100"
 #   gh api users/OWNER      --jq .id
 #   gh api repos/OWNER/REPO --jq .id
 #
-# Os repos não são todos do mesmo dono — o da aplicação fica na conta de outro
-# integrante —, por isso o owner_id acompanha cada entrada.
+# Os repos podem não ser todos do mesmo dono, por isso o owner_id acompanha cada
+# entrada. São os que fazem deploy ou aplicam Terraform: a plataforma e os
+# três serviços.
 github_repositories = [
   { repo = "SUA_ORG/tc3-infra-k8s", owner_id = "000000000", repo_id = "0000000000" },
-  { repo = "SUA_ORG/tc3-infra-db", owner_id = "000000000", repo_id = "0000000000" },
   { repo = "SUA_ORG/tc3-auth-lambda", owner_id = "000000000", repo_id = "0000000000" },
-  { repo = "OUTRA_ORG/tech-challenge-fiap", owner_id = "000000000", repo_id = "0000000000" },
+  { repo = "SUA_ORG/tech-challenge-fiap", owner_id = "000000000", repo_id = "0000000000" },
+  { repo = "SUA_ORG/oficina-billing-service", owner_id = "000000000", repo_id = "0000000000" },
+  { repo = "SUA_ORG/oficina-execution-service", owner_id = "000000000", repo_id = "0000000000" },
 ]

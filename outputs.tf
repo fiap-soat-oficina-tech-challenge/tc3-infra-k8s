@@ -1,4 +1,4 @@
-# Consumidos por tc3-infra-db e tc3-auth-lambda via terraform_remote_state.
+# Consumidos por tc3-auth-lambda e pelo terraform/ dos serviços via terraform_remote_state.
 
 output "vpc_id" {
   value = module.vpc.vpc_id

@@ -1,5 +1,5 @@
 # ─── Chave de ingestão ──────────────────────────────────────────────────────
-# Mesmo padrão do DATABASE_URL em tc3-infra-db: o segredo nasce em um lugar só e
+# Mesmo padrão do DATABASE_URL do OS: o segredo nasce em um lugar só e
 # os demais repositórios leem do SSM. Sem isso a license key precisaria estar
 # repetida como secret nos quatro repositórios, e rotacioná-la viraria uma
 # operação manual em quatro lugares.
